@@ -1,0 +1,92 @@
+name: 申诉
+description: 对已收录账号提出申诉或修正请求
+title: "[申诉] 平台 / 账号名称 / UID"
+labels:
+  - 申诉
+  - 待人工审批
+body:
+  - type: markdown
+    attributes:
+      value: |
+        申诉需要人工审批，不会自动移除账号，也不会触发自动收录流程。
+
+        请只提交公开、可核验的信息。恶意申诉、伪造信息、批量骚扰或滥用申诉流程，可能被记录进永久黑名单。
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台
+      description: 必选。请选择被申诉记录所在平台。
+      options:
+        - 抖音
+        - 哔哩哔哩
+        - 小红书
+        - 微信公众号
+        - 微信视频号
+    validations:
+      required: true
+
+  - type: input
+    id: platform_uid
+    attributes:
+      label: 平台 UID / 唯一标识
+      description: 必填。请填写被申诉账号的稳定唯一标识。
+      placeholder: 例如：123456789 / 小红书号 / 公众号ID / 视频号ID
+    validations:
+      required: true
+
+  - type: input
+    id: account_name
+    attributes:
+      label: 账号名称
+      description: 必填。请输入被申诉账号的当前显示名。
+      placeholder: 请输入账号显示名
+    validations:
+      required: true
+
+  - type: dropdown
+    id: appeal_type
+    attributes:
+      label: 申诉类型
+      description: 必选。请选择最接近的一项。
+      options:
+        - 误收录
+        - 证据失效
+        - 账号已转型
+        - 信息错误
+        - 请求补充说明
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: appeal_reason
+    attributes:
+      label: 申诉理由
+      description: 必填。请说明为什么该记录应被修改、标记为申诉中或移除。
+      placeholder: 请写明可核验事实，不要提交私人信息或攻击性内容。
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 补充证据
+      description: 选填。可以提供公开链接，每行一个。
+      placeholder: |
+        https://...
+        https://...
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: 申诉确认
+      options:
+        - label: 我确认申诉内容基于公开、可核验的信息。
+          required: true
+        - label: 我理解申诉需要人工审批，不会自动生效。
+          required: true
+        - label: 我理解恶意申诉、伪造信息或滥用流程可能被记录进永久黑名单。
+          required: true
