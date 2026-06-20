@@ -6,9 +6,11 @@ Humans create and serve for humans. AI serves the production process.
 
 ## 项目定位
 
-本项目用于记录各平台上经用户提交、人工审核后的疑似 AI 内容账号。
+本项目用于记录各平台上经用户提交、审核后的疑似 AI 内容账号。
 
-当前阶段采用简化结构：
+本项目的内容可用于制作用于屏蔽的非商业化的浏览器插件、工具等等。
+
+当前采用简化结构：
 
 ```text
 数据源/      # JSON，人工维护，保存完整账号信息
