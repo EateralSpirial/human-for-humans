@@ -1,6 +1,6 @@
 name: 新增疑似账号
 description: 提交一个疑似 AI 内容账号
-title: "[新增账号] 账号名称 / UID"
+title: "[新增账号] 平台 / 账号名称 / UID"
 labels:
   - 新增账号
   - 待审核
@@ -8,7 +8,21 @@ body:
   - type: markdown
     attributes:
       value: |
-        只需要填写账号名称和平台 UID / 唯一标识即可提交。其他信息可以选填，维护者后续复核补充。
+        只需要填写平台、账号名称和平台 UID / 唯一标识即可提交。其他信息可以选填，维护者后续复核补充。
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台
+      description: 必选。请选择该账号所在平台。
+      options:
+        - 抖音
+        - 哔哩哔哩
+        - 小红书
+        - 微信公众号
+        - 微信视频号
+    validations:
+      required: true
 
   - type: input
     id: platform_uid
@@ -27,21 +41,6 @@ body:
       placeholder: 请输入账号显示名
     validations:
       required: true
-
-  - type: dropdown
-    id: platform
-    attributes:
-      label: 平台
-      description: 选填。不确定可以留空。
-      options:
-        - 不确定
-        - 抖音
-        - 哔哩哔哩
-        - 小红书
-        - 微信公众号
-        - 微信视频号
-    validations:
-      required: false
 
   - type: input
     id: homepage
