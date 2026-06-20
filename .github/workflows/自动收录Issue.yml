@@ -12,13 +12,12 @@ permissions:
 
 jobs:
   ingest:
-    if: ${{ !github.event.issue.pull_request }}
+    if: ${{ !github.event.issue.pull_request && startsWith(github.event.issue.title, '[新增账号]') }}
     runs-on: ubuntu-latest
     env:
       ISSUE_BODY: ${{ github.event.issue.body }}
       ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
-      ISSUE_URL: ${{ github.event.issue.html_url }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
@@ -36,7 +35,6 @@ jobs:
           import re
           import unicodedata
           from datetime import date
-
           from pypinyin import lazy_pinyin
 
           root = pathlib.Path('.')
@@ -48,7 +46,6 @@ jobs:
           body = os.environ.get('ISSUE_BODY', '')
           author = os.environ.get('ISSUE_AUTHOR', 'unknown')
           issue_number = os.environ.get('ISSUE_NUMBER', '')
-          issue_url = os.environ.get('ISSUE_URL', '')
           today = date.today().isoformat()
 
           platform_file = {
@@ -58,7 +55,6 @@ jobs:
               '微信公众号': '微信公众号.json',
               '微信视频号': '微信视频号.json',
           }
-
           platform_code = {
               '抖音': 'douyin',
               '哔哩哔哩': 'bilibili',
@@ -73,17 +69,14 @@ jobs:
               if not match:
                   return ''
               value = match.group(1).strip()
-              if value == '_No response_':
-                  return ''
-              return value
+              return '' if value == '_No response_' else value
 
           def clean(value):
               return unicodedata.normalize('NFKC', str(value or '')).strip()
 
           def norm(value):
-              text = unicodedata.normalize('NFKC', str(value or '')).strip().lower()
-              text = re.sub(r'\s+', ' ', text)
-              return text
+              text = clean(value).lower()
+              return re.sub(r'\s+', ' ', text)
 
           def make_sort_name(name):
               name = clean(name)
@@ -95,14 +88,13 @@ jobs:
                       parts.append(token.lower())
               return norm(' '.join(parts))
 
-          def parse_links(text):
-              links = []
+          def parse_lines(text):
+              result = []
               for line in str(text or '').splitlines():
                   line = line.strip()
-                  if not line or line == '_No response_':
-                      continue
-                  links.append(line)
-              return links
+                  if line and line != '_No response_':
+                      result.append(line)
+              return result
 
           def sort_key(item):
               return (
@@ -125,14 +117,13 @@ jobs:
               url = clean(url)
               if not url:
                   return ''
-              safe_url = url.replace(')', '%29').replace('(', '%28')
-              return f'[主页]({safe_url})'
+              return f"[主页]({url.replace(')', '%29').replace('(', '%28')})"
 
           platform = clean(get_section('平台'))
           uid = clean(get_section('平台 UID / 唯一标识'))
           account_name = clean(get_section('账号名称'))
           homepage = clean(get_section('主页链接'))
-          evidence = parse_links(get_section('证据链接'))
+          evidence = parse_lines(get_section('证据链接'))
           reason = clean(get_section('疑似原因'))
 
           errors = []
@@ -142,12 +133,8 @@ jobs:
               errors.append('平台 UID / 唯一标识缺失。')
           if not account_name:
               errors.append('账号名称缺失。')
-
           if errors:
-              pathlib.Path('处理结果.md').write_text(
-                  '自动收录失败：\n\n' + '\n'.join(f'- {e}' for e in errors) + '\n',
-                  encoding='utf-8',
-              )
+              pathlib.Path('处理结果.md').write_text('自动收录失败：\n\n' + '\n'.join(f'- {e}' for e in errors) + '\n', encoding='utf-8')
               raise SystemExit(1)
 
           path = source_dir / platform_file[platform]
@@ -164,13 +151,9 @@ jobs:
               }
 
           accounts = data.setdefault('账号', [])
-          target = None
-          for item in accounts:
-              if clean(item.get('平台UID')) == uid:
-                  target = item
-                  break
-
+          target = next((item for item in accounts if clean(item.get('平台UID')) == uid), None)
           changed_type = '新增'
+
           if target is None:
               target = {
                   '平台UID': uid,
@@ -192,11 +175,6 @@ jobs:
                   target['提交人数'] = int(target.get('提交人数', 0)) + 1
               else:
                   changed_type = '重复提交，未增加计数'
-
-              if account_name and not clean(target.get('账号名称')):
-                  target['账号名称'] = account_name
-              if not clean(target.get('排序名')):
-                  target['排序名'] = make_sort_name(target.get('账号名称') or account_name)
               if homepage and not clean(target.get('主页链接')):
                   target['主页链接'] = homepage
               if evidence:
@@ -206,6 +184,8 @@ jobs:
                           old.append(link)
               if reason and not clean(target.get('疑似原因')):
                   target['疑似原因'] = reason
+              if not clean(target.get('排序名')):
+                  target['排序名'] = make_sort_name(target.get('账号名称') or account_name)
 
           target['来源Issue'] = f'#{issue_number}'
           target['最近提交日期'] = today
@@ -213,56 +193,41 @@ jobs:
           data['账号'] = sorted(accounts, key=sort_key)
           path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
-          tiers = {
-              '一级疑似': [],
-              '二级疑似': [],
-              '三级疑似': [],
-          }
-
+          tiers = {'一级疑似': [], '二级疑似': [], '三级疑似': []}
           for src in sorted(source_dir.glob('*.json'), key=lambda p: norm(p.name)):
               src_data = json.loads(src.read_text(encoding='utf-8'))
               src_platform = src_data.get('平台', src.stem)
-              src_accounts = src_data.get('账号', [])
-              src_data['账号'] = sorted(src_accounts, key=sort_key)
+              src_accounts = sorted(src_data.get('账号', []), key=sort_key)
+              src_data['账号'] = src_accounts
               src_data['更新时间'] = today
               src.write_text(json.dumps(src_data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-
-              for account in src_data['账号']:
+              for account in src_accounts:
                   if clean(account.get('状态')) == '已移除':
                       continue
-                  count = int(account.get('提交人数', 0))
-                  level = tier_name(count)
-                  if not level:
-                      continue
-                  tiers[level].append({
-                      '平台': src_platform,
-                      '平台UID': clean(account.get('平台UID')),
-                      '账号名称': clean(account.get('账号名称')),
-                      '排序名': clean(account.get('排序名')),
-                      '主页链接': clean(account.get('主页链接')),
-                      '提交人数': count,
-                  })
+                  level = tier_name(int(account.get('提交人数', 0)))
+                  if level:
+                      tiers[level].append({
+                          '平台': src_platform,
+                          '平台UID': clean(account.get('平台UID')),
+                          '账号名称': clean(account.get('账号名称')),
+                          '排序名': clean(account.get('排序名')),
+                          '主页链接': clean(account.get('主页链接')),
+                          '提交人数': int(account.get('提交人数', 0)),
+                      })
 
           def write_tier(filename, title, description, rows):
               rows = sorted(rows, key=sort_key)
               lines = [
-                  f'# {title}',
-                  '',
-                  '> 本文件由 `数据源/*.json` 自动生成，请勿手动编辑。',
-                  '>',
-                  f'> {description}',
-                  '>',
-                  '> 排序规则：按 `排序名` 升序排列；中文按拼音，英文按 a-z。',
-                  '',
-                  f'更新时间：{today}',
-                  '',
+                  f'# {title}', '',
+                  '> 本文件由 `数据源/*.json` 自动生成，请勿手动编辑。', '>',
+                  f'> {description}', '>',
+                  '> 排序规则：按 `排序名` 升序排列；中文按拼音，英文按 a-z。', '',
+                  f'更新时间：{today}', '',
                   '| 序号 | 平台 | 平台UID | 账号名称 | 主页链接 | 提交人数 |',
                   '|---:|---|---|---|---|---:|',
               ]
               for i, item in enumerate(rows, start=1):
-                  lines.append(
-                      f"| {i} | {item['平台']} | {item['平台UID']} | {item['账号名称']} | {md_link(item['主页链接'])} | {item['提交人数']} |"
-                  )
+                  lines.append(f"| {i} | {item['平台']} | {item['平台UID']} | {item['账号名称']} | {md_link(item['主页链接'])} | {item['提交人数']} |")
               lines.append('')
               (out_dir / filename).write_text('\n'.join(lines), encoding='utf-8')
 
@@ -270,8 +235,10 @@ jobs:
           write_tier('二级疑似.md', '二级疑似账号名单', '范围：6-100 名有效独立提交者。', tiers['二级疑似'])
           write_tier('三级疑似.md', '三级疑似账号名单', '范围：101 名及以上有效独立提交者。', tiers['三级疑似'])
 
-          result = f'''自动收录完成。\n\n- 处理类型：{changed_type}\n- 平台：{platform}\n- 平台 UID / 唯一标识：{uid}\n- 账号名称：{account_name}\n- 当前提交人数：{target.get('提交人数', 1)}\n- 数据源：`数据源/{platform_file[platform]}`\n'''
-          pathlib.Path('处理结果.md').write_text(result, encoding='utf-8')
+          pathlib.Path('处理结果.md').write_text(
+              f'自动收录完成。\n\n- 处理类型：{changed_type}\n- 平台：{platform}\n- 平台 UID / 唯一标识：{uid}\n- 账号名称：{account_name}\n- 当前提交人数：{target.get("提交人数", 1)}\n- 数据源：`数据源/{platform_file[platform]}`\n',
+              encoding='utf-8',
+          )
           PY
 
       - name: Commit changes
