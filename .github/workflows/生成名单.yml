@@ -1,0 +1,194 @@
+name: 生成账号名单
+
+on:
+  push:
+    paths:
+      - '数据源/**.json'
+      - '.github/workflows/生成名单.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate lists
+        run: |
+          python - <<'PY'
+          import json
+          import pathlib
+          import re
+          import unicodedata
+          from datetime import date
+
+          root = pathlib.Path('.')
+          source_dir = root / '数据源'
+          out_dir = root / '账号名单'
+          out_dir.mkdir(exist_ok=True)
+
+          today = date.today().isoformat()
+
+          required_fields = [
+              '平台UID',
+              '账号名称',
+              '排序名',
+              '主页链接',
+              '提交人数',
+              '证据链接',
+              '状态',
+          ]
+
+          tiers = {
+              '一级疑似': [],
+              '二级疑似': [],
+              '三级疑似': [],
+          }
+
+          def norm(value):
+              text = unicodedata.normalize('NFKC', str(value or '')).strip().lower()
+              text = re.sub(r'\s+', ' ', text)
+              return text
+
+          def sort_key(item):
+              return (
+                  norm(item.get('排序名')),
+                  norm(item.get('平台')),
+                  norm(item.get('平台UID')),
+                  norm(item.get('账号名称')),
+              )
+
+          def tier_name(count):
+              if 1 <= count <= 5:
+                  return '一级疑似'
+              if 6 <= count <= 100:
+                  return '二级疑似'
+              if count >= 101:
+                  return '三级疑似'
+              return None
+
+          def md_link(url):
+              url = str(url or '').strip()
+              if not url:
+                  return ''
+              safe_url = url.replace(')', '%29').replace('(', '%28')
+              return f'[主页]({safe_url})'
+
+          def row(platform, account):
+              return {
+                  '平台': platform,
+                  '平台UID': str(account.get('平台UID', '')).strip(),
+                  '账号名称': str(account.get('账号名称', '')).strip(),
+                  '排序名': str(account.get('排序名', '')).strip(),
+                  '主页链接': str(account.get('主页链接', '')).strip(),
+                  '提交人数': int(account.get('提交人数', 0)),
+              }
+
+          files = sorted(source_dir.glob('*.json'), key=lambda p: norm(p.name))
+          if not files:
+              raise SystemExit('没有找到 数据源/*.json 文件')
+
+          errors = []
+
+          for path in files:
+              data = json.loads(path.read_text(encoding='utf-8'))
+              platform = data.get('平台')
+              accounts = data.get('账号')
+
+              if not platform:
+                  errors.append(f'{path}: 缺少 平台 字段')
+                  continue
+              if not isinstance(accounts, list):
+                  errors.append(f'{path}: 账号 必须是数组')
+                  continue
+
+              seen_uids = set()
+              for idx, account in enumerate(accounts, start=1):
+                  if not isinstance(account, dict):
+                      errors.append(f'{path}: 第 {idx} 条账号不是对象')
+                      continue
+
+                  for field in required_fields:
+                      if field not in account:
+                          errors.append(f'{path}: 第 {idx} 条账号缺少字段 {field}')
+
+                  uid = str(account.get('平台UID', '')).strip()
+                  if uid:
+                      if uid in seen_uids:
+                          errors.append(f'{path}: 平台UID 重复：{uid}')
+                      seen_uids.add(uid)
+
+                  try:
+                      count = int(account.get('提交人数', 0))
+                  except Exception:
+                      errors.append(f'{path}: 第 {idx} 条账号的 提交人数 必须是整数')
+                      continue
+
+                  evidence = account.get('证据链接', [])
+                  if not isinstance(evidence, list):
+                      errors.append(f'{path}: 第 {idx} 条账号的 证据链接 必须是数组')
+
+                  status = str(account.get('状态', '')).strip()
+                  if status == '已移除':
+                      continue
+
+                  name = tier_name(count)
+                  if name:
+                      tiers[name].append(row(platform, account))
+
+              data['账号'] = sorted(accounts, key=sort_key)
+              data['更新时间'] = today
+              path.write_text(
+                  json.dumps(data, ensure_ascii=False, indent=2) + '\n',
+                  encoding='utf-8',
+              )
+
+          if errors:
+              print('\n'.join(errors))
+              raise SystemExit(1)
+
+          def write_tier(filename, title, description, rows):
+              rows = sorted(rows, key=sort_key)
+              lines = [
+                  f'# {title}',
+                  '',
+                  '> 本文件由 `数据源/*.json` 自动生成，请勿手动编辑。',
+                  '>',
+                  f'> {description}',
+                  '>',
+                  '> 排序规则：按 `排序名` 升序排列；中文按拼音，英文按 a-z。',
+                  '',
+                  f'更新时间：{today}',
+                  '',
+                  '| 序号 | 平台 | 平台UID | 账号名称 | 主页链接 | 提交人数 |',
+                  '|---:|---|---|---|---|---:|',
+              ]
+              for i, item in enumerate(rows, start=1):
+                  lines.append(
+                      f"| {i} | {item['平台']} | {item['平台UID']} | {item['账号名称']} | {md_link(item['主页链接'])} | {item['提交人数']} |"
+                  )
+              lines.append('')
+              (out_dir / filename).write_text('\n'.join(lines), encoding='utf-8')
+
+          write_tier('一级疑似.md', '一级疑似账号名单', '范围：1-5 名有效独立提交者。', tiers['一级疑似'])
+          write_tier('二级疑似.md', '二级疑似账号名单', '范围：6-100 名有效独立提交者。', tiers['二级疑似'])
+          write_tier('三级疑似.md', '三级疑似账号名单', '范围：101 名及以上有效独立提交者。', tiers['三级疑似'])
+          PY
+
+      - name: Commit generated files
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add 数据源 账号名单
+            git commit -m "chore: generate account lists"
+            git push
+          else
+            echo "No changes to commit."
+          fi
